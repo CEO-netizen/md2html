@@ -1,133 +1,152 @@
 use pulldown_cmark::{html, Options, Parser};
-use std::process::Command;
-use std::env;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
+use std::process::Command;
+use clap::{Arg, Command as ClapCommand};
+use indicatif::{ProgressBar, ProgressStyle};
 
-// Function to print the progress bar
-fn print_progress_bar(completed: usize, total: usize) {
-    let bar_width = 40;
-    let progress = completed * bar_width / total;
-    let bar = "█".repeat(progress) + &" ".repeat(bar_width - progress);
-    print!("\r[{}] {}%", bar, (completed * 100 / total).min(100));
-    let _ = io::stdout().flush();
+/// Convert markdown content to HTML string with given options.
+fn markdown_to_html(markdown_input: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(markdown_input, options);
+
+    let mut html_body = String::new();
+    html::push_html(&mut html_body, parser);
+    html_body
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!("Usage: {} <input_markdown_file(s).md> <output_html_file(s).html> [--css <css_file>] [--title <title>] [--preview]", args[0]);
-        return Ok(());
-    }
-
-    // Parse optional arguments
-    let mut css_path: Option<String> = None;
-    let mut title: Option<String> = None;
-    let mut preview = false;
-    let mut input_files = Vec::new();
-    let mut output_files = Vec::new();
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--css" => {
-                if i + 1 < args.len() {
-                    css_path = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Missing value for --css");
-                    return Ok(());
-                }
-            }
-            "--title" => {
-                if i + 1 < args.len() {
-                    title = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Missing value for --title");
-                    return Ok(());
-                }
-            }
-            "--preview" => {
-                preview = true;
-                i += 1;
-            }
-            s if s.ends_with(".md") => {
-                input_files.push(s.to_string());
-                if i + 1 < args.len() && args[i + 1].ends_with(".html") {
-                    output_files.push(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Missing output HTML file for input: {}", s);
-                    return Ok(());
-                }
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-
-    if input_files.is_empty() || output_files.is_empty() || input_files.len() != output_files.len() {
-        eprintln!("Provide matching input and output files.");
-        return Ok(());
-    }
-
-    for (input_file_path_str, output_file_path_str) in input_files.iter().zip(output_files.iter()) {
-        let input_file_path = Path::new(input_file_path_str);
-        let output_file_path = Path::new(output_file_path_str);
-        let markdown_input = fs::read_to_string(input_file_path)?;
-
-        let mut options = Options::empty();
-        options.insert(Options::ENABLE_STRIKETHROUGH);
-        let parser = Parser::new_ext(&markdown_input, options);
-
-        let mut html_body = String::new();
-        html::push_html(&mut html_body, parser);
-
-        // Build HTML boilerplate
-        let doc_title = title.clone().unwrap_or_else(|| input_file_path_str.clone());
-        let mut html_output = String::new();
-        html_output.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n");
-        html_output.push_str(&format!("<title>{}</title>\n", doc_title));
-        if let Some(css_file) = &css_path {
-            if let Ok(css_content) = fs::read_to_string(css_file) {
+/// Build full HTML document with optional title and CSS (inline or linked).
+fn build_html_document(body: &str, title: &str, css_path: Option<&str>) -> io::Result<String> {
+    let mut html_output = String::new();
+    html_output.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n");
+    html_output.push_str(&format!("<title>{}</title>\n", title));
+    if let Some(css_file) = css_path {
+        match fs::read_to_string(css_file) {
+            Ok(css_content) => {
                 html_output.push_str("<style>\n");
                 html_output.push_str(&css_content);
                 html_output.push_str("\n</style>\n");
-            } else {
+            }
+            Err(_) => {
                 html_output.push_str(&format!("<link rel=\"stylesheet\" href=\"{}\">\n", css_file));
             }
         }
-        html_output.push_str("</head>\n<body>\n");
-        html_output.push_str(&html_body);
-        html_output.push_str("\n</body>\n</html>\n");
-
-        let total_steps = html_output.len().max(1);
-        let mut file = File::create(output_file_path)?;
-        let chunk_size = total_steps / 100.max(1);
-        for (i, chunk) in html_output.as_bytes().chunks(chunk_size.max(1)).enumerate() {
-            file.write_all(chunk)?;
-            print_progress_bar((i + 1) * chunk_size, total_steps);
-        }
-        println!("\nConversion successful: {} -> {}", input_file_path_str, output_file_path_str);
-
-        // Live preview
-        if preview {
-            #[cfg(target_os = "linux")]
-            {
-                let _ = Command::new("xdg-open").arg(output_file_path_str).spawn();
-            }
-            #[cfg(target_os = "windows")]
-            {
-                let _ = Command::new("cmd").args(["/C", "start", output_file_path_str]).spawn();
-            }
-            #[cfg(target_os = "macos")]
-            {
-                let _ = Command::new("open").arg(output_file_path_str).spawn();
-            }
-        }
     }
+    html_output.push_str("</head>\n<body>\n");
+    html_output.push_str(body);
+    html_output.push_str("\n</body>\n</html>\n");
+    Ok(html_output)
+}
+
+/// Write content to file with a progress bar.
+fn write_file_with_progress(path: &Path, content: &str) -> io::Result<()> {
+    let total_size = content.len() as u64;
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{bar:40.cyan/blue}] {percent}%")
+            .expect("Failed to set progress bar template")
+            .progress_chars("=> "),
+    );
+
+    let mut file = File::create(path)?;
+    let bytes = content.as_bytes();
+    let chunk_size = 8192;
+    let mut written = 0;
+
+    while written < bytes.len() {
+        let end = std::cmp::min(written + chunk_size, bytes.len());
+        file.write_all(&bytes[written..end])?;
+        written = end;
+        pb.set_position(written as u64);
+    }
+    pb.finish_with_message("Done");
     Ok(())
 }
 
+/// Open the file in the default system viewer for live preview.
+fn open_in_default_viewer(path: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg(path).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("cmd").args(["/C", "start", path]).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(path).spawn();
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let matches = ClapCommand::new("md2html")
+        .version("1.0")
+        .author("md2html Author")
+        .about("Convert Markdown files to HTML")
+        .arg(
+            Arg::new("input")
+                .help("Input markdown file(s)")
+                .required(true)
+                .min_values(1),
+        )
+        .arg(
+            Arg::new("output")
+                .help("Output HTML file(s)")
+                .required(true)
+                .min_values(1)
+                .last(true),
+        )
+        .arg(
+            Arg::new("css")
+                .long("css")
+                .takes_value(true)
+                .help("CSS file to include (inline or linked)"),
+        )
+        .arg(
+            Arg::new("title")
+                .long("title")
+                .takes_value(true)
+                .help("Title of the HTML document"),
+        )
+        .arg(
+            Arg::new("preview")
+                .long("preview")
+                .takes_value(false)
+                .help("Open the output HTML file(s) in default viewer"),
+        )
+        .get_matches();
+
+    let input_files: Vec<_> = matches.values_of("input").unwrap().collect();
+    let output_files: Vec<_> = matches.values_of("output").unwrap().collect();
+
+    if input_files.len() != output_files.len() {
+        eprintln!("Number of input and output files must match.");
+        std::process::exit(1);
+    }
+
+    let css_path = matches.value_of("css");
+    let title = matches.value_of("title");
+
+    let preview = matches.is_present("preview");
+
+    for (input_file, output_file) in input_files.iter().zip(output_files.iter()) {
+        let markdown_input = fs::read_to_string(input_file)?;
+        let html_body = markdown_to_html(&markdown_input);
+        let doc_title = title.unwrap_or(input_file);
+        let html_output = build_html_document(&html_body, doc_title, css_path)?;
+
+        write_file_with_progress(Path::new(output_file), &html_output)?;
+
+        println!("Conversion successful: {} -> {}", input_file, output_file);
+
+        if preview {
+            open_in_default_viewer(output_file);
+        }
+    }
+
+    Ok(())
+}
