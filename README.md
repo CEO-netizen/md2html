@@ -22,10 +22,4 @@ md2html <input_markdown_file(s).md> <output_html_file(s).html> [--css <css_file>
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
-
-## Donation Address
-
-Support development with Bitcoin at:
-
-[![Donate Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-FF9900?logo=bitcoin&style=flat-square)](bitcoin=bc1qx8tyfmeapz0663pzlgevvhe3dsdcg83yxgkhhs)
+This project is licensed under the GPL 3 License. See the LICENSE file for details.
