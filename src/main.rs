@@ -4,7 +4,6 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
-use std::{thread, time::Duration};
 
 // Function to print the progress bar
 fn print_progress_bar(completed: usize, total: usize) {
