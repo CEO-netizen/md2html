@@ -1,6 +1,6 @@
 # md2html
 
-Version 0.1.0
+Version 0.1.5
 
 A command-line tool written in Rust to convert Markdown files to HTML files. Supports optional CSS styling, custom HTML title, and live preview of the generated HTML.
 
